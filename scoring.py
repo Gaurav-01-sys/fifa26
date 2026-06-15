@@ -1,0 +1,448 @@
+"""
+FIFA World Cup 2026 Prediction League - Scoring Engine
+Fully generic: no player names, fixtures, or results are hardcoded.
+Everything is derived from the uploaded prediction workbook and the
+actual-results input supplied at runtime (via the Streamlit UI).
+"""
+import pandas as pd
+
+# Scoring rule constants (only the RULES are fixed, not the data)
+CORRECT_RESULT_POINTS = 2   # winner / draw correctly predicted
+EXACT_SCORE_POINTS = 5      # exact score correctly predicted
+
+
+def _outcome(s1, s2):
+    """Return 'team1', 'team2', or 'draw'."""
+    if s1 > s2:
+        return "team1"
+    elif s2 > s1:
+        return "team2"
+    return "draw"
+
+
+def _seek0(f):
+    """Seek a file-like stream back to the start (no-op for plain paths)."""
+    if hasattr(f, "seek"):
+        try:
+            f.seek(0)
+        except Exception:
+            pass
+
+
+def load_predictions(xlsx_path, nvidia_api_key: str = "", progress_callback=None):
+    """Load every player's sheet from the combined predictions workbook.
+
+    Player names are taken from the sheet names of the uploaded file.
+
+    Parsing priority
+    ----------------
+    1. LLM parser (llm_parser.parse_xlsx_with_llm) — when *nvidia_api_key*
+       is provided.  Handles any layout without brittle column-detection.
+    2. MarkItDown — converts xlsx → markdown tables, then regex-parses them.
+    3. Pandas fallback — direct cell-scan with openpyxl via pandas.ExcelFile.
+    """
+    if xlsx_path is None:
+        return {}
+
+    # 1. Direct LLM / MarkItDown parser (most robust, handles any layout)
+    # ------------------------------------------------------------------
+    if nvidia_api_key and nvidia_api_key.strip():
+        try:
+            from llm_parser import parse_predictions
+            _seek0(xlsx_path)
+            filename = getattr(xlsx_path, "name", "")
+            result = parse_predictions(
+                xlsx_path,
+                filename=filename,
+                api_key=nvidia_api_key.strip(),
+                progress_callback=progress_callback,
+            )
+            # Only accept if at least one player has actual predictions
+            if result and any(v["predictions"] for v in result.values()):
+                return result
+        except Exception:
+            pass  # fall through to next method
+
+
+    _seek0(xlsx_path)
+    try:
+        from markitdown import MarkItDown
+        import io
+        import re
+
+        md = MarkItDown()
+        
+        # Check if xlsx_path is a path string or a file-like stream
+        if isinstance(xlsx_path, str):
+            result = md.convert(xlsx_path)
+        else:
+            # It's a file-like stream (e.g. Streamlit UploadedFile)
+            # Make sure we read it as a binary stream
+            if hasattr(xlsx_path, "seek"):
+                xlsx_path.seek(0)
+            stream_data = io.BytesIO(xlsx_path.read())
+            # restore stream position just in case pandas fallback needs it
+            if hasattr(xlsx_path, "seek"):
+                xlsx_path.seek(0)
+            result = md.convert_stream(stream_data, mime_type="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet")
+            
+        text = result.text_content
+        
+        # Parse markitdown output
+        # Split by sheet header '## '
+        sheets = text.split("\n## ")
+        # if the first sheet starts at the beginning of the file, it might start with '## ' without '\n'
+        if len(sheets) == 1 and text.startswith("## "):
+            sheets = text.split("## ")
+        elif len(sheets) > 1 and text.startswith("## "):
+            first_parts = sheets[0].split("## ")
+            if len(first_parts) > 1:
+                sheets = first_parts[1:] + sheets[1:]
+
+        players = {}
+        for sheet in sheets:
+            if not sheet.strip():
+                continue
+            lines = [line.strip() for line in sheet.split("\n") if line.strip()]
+            if not lines:
+                continue
+            
+            player_name = lines[0].replace("## ", "").strip()
+            preds = {}
+            winner = None
+            
+            # Locate all markdown table rows
+            table_rows = []
+            for line in lines[1:]:
+                if line.startswith("|"):
+                    table_rows.append(line)
+                    
+            header_index = -1
+            headers = []
+            
+            # Find header row containing "Match No." or similar
+            for i, row in enumerate(table_rows):
+                cells = [c.strip() for c in row.split("|")[1:-1]]
+                if any("match" in c.lower() and "no" in c.lower() for c in cells):
+                    header_index = i
+                    headers = cells
+                    break
+                    
+            if header_index == -1:
+                # Fallback: find by "team 1" and "team 2"
+                for i, row in enumerate(table_rows):
+                    cells = [c.strip() for c in row.split("|")[1:-1]]
+                    if any("team 1" in c.lower() for c in cells) and any("team 2" in c.lower() for c in cells):
+                        header_index = i
+                        headers = cells
+                        break
+                        
+            if header_index != -1:
+                # Map column indices
+                col_match = -1
+                col_t1 = -1
+                col_t2 = -1
+                col_s1 = -1
+                col_s2 = -1
+                
+                for idx, h in enumerate(headers):
+                    h_lower = h.lower()
+                    if "match" in h_lower:
+                        col_match = idx
+                    elif "team 1" in h_lower and "score" not in h_lower:
+                        col_t1 = idx
+                    elif "team 2" in h_lower and "score" not in h_lower:
+                        col_t2 = idx
+                    elif "team 1 score" in h_lower or "score 1" in h_lower or ("team 1" in h_lower and "score" in h_lower):
+                        col_s1 = idx
+                    elif "team 2 score" in h_lower or "score 2" in h_lower or ("team 2" in h_lower and "score" in h_lower):
+                        col_s2 = idx
+                        
+                # Determine data start offset
+                start_row_offset = 1
+                if header_index + 1 < len(table_rows):
+                    next_row = table_rows[header_index + 1]
+                    if all(c in "-:| " for c in next_row.replace("|", "").strip()):
+                        start_row_offset = 2
+                        
+                for row in table_rows[header_index + start_row_offset:]:
+                    cells = [c.strip() for c in row.split("|")[1:-1]]
+                    if len(cells) <= max(col_match, col_t1, col_t2, col_s1, col_s2):
+                        continue
+                    try:
+                        m_val = cells[col_match].replace(",", "").strip()
+                        if not m_val.isdigit():
+                            continue
+                        match_no = int(m_val)
+                        t1 = cells[col_t1].strip()
+                        t2 = cells[col_t2].strip()
+                        s1 = int(cells[col_s1].strip()) if cells[col_s1].strip().isdigit() else None
+                        s2 = int(cells[col_s2].strip()) if cells[col_s2].strip().isdigit() else None
+                        
+                        if s1 is not None and s2 is not None:
+                            preds[match_no] = {
+                                "team1": t1,
+                                "team2": t2,
+                                "score1": s1,
+                                "score2": s2
+                            }
+                    except Exception:
+                        pass
+                        
+            # Look for winning team prediction
+            for line in lines[1:]:
+                line_lower = line.lower()
+                if "winning team" in line_lower or "champion" in line_lower:
+                    parts = [p.strip() for p in line.split("|") if p.strip()]
+                    for idx, part in enumerate(parts):
+                        if "winning team" in part.lower() or "champion" in part.lower():
+                            if idx + 1 < len(parts):
+                                winner = parts[idx + 1]
+                                winner = re.sub(r'[\*\`\_]', '', winner).strip()
+                                if winner.lower() in ("nan", ""):
+                                    winner = None
+                                break
+                    if winner:
+                        break
+                        
+            players[player_name] = {"predictions": preds, "winning_team_pick": winner}
+            
+        if players:
+            return players
+            
+    except Exception:
+        pass
+
+    # Fallback to search-based pandas parsing
+    _seek0(xlsx_path)
+    try:
+        xl = pd.ExcelFile(xlsx_path)
+        players = {}
+        for sheet in xl.sheet_names:
+            try:
+                raw = pd.read_excel(xl, sheet_name=sheet, header=None)
+                
+                # Search all cells in the worksheet for "Match No.", "Team 1", or "eam 1"
+                header_row = None
+                for r_idx in range(len(raw)):
+                    for c_idx in range(len(raw.columns)):
+                        val = str(raw.iloc[r_idx, c_idx]).strip().lower()
+                        if "match no" in val or val == "match no." or "team 1" in val or "eam 1" in val:
+                            header_row = r_idx
+                            break
+                    if header_row is not None:
+                        break
+                        
+                if header_row is None:
+                    continue
+                    
+                # Align the headers
+                header = raw.iloc[header_row].tolist()
+                data = raw.iloc[header_row + 1:].copy()
+                data.columns = header
+                
+                # Map header names robustly
+                col_match = None
+                col_t1 = None
+                col_t2 = None
+                col_s1 = None
+                col_s2 = None
+                
+                for h in header:
+                    h_str = str(h).strip().lower()
+                    if "match no" in h_str:
+                        col_match = h
+                    elif ("team 1" in h_str or "eam 1" in h_str) and "scor" not in h_str:
+                        col_t1 = h
+                    elif ("team 2" in h_str or "eam 2" in h_str) and "scor" not in h_str:
+                        col_t2 = h
+                    elif "team 1 score" in h_str or "score 1" in h_str or ("team 1" in h_str and "score" in h_str) or "eam 1 scor" in h_str:
+                        col_s1 = h
+                    elif "team 2 score" in h_str or "score 2" in h_str or ("team 2" in h_str and "score" in h_str) or "eam 2 scor" in h_str:
+                        col_s2 = h
+                        
+                if not all([col_t1, col_t2, col_s1, col_s2]):
+                    continue
+                    
+                data = data.dropna(subset=[col_t1, col_s1], how='all')
+                
+                preds = {}
+                auto_mn = 0
+                for _, row in data.iterrows():
+                    try:
+                        if col_match:
+                            m_val = str(row[col_match]).strip()
+                            if "." in m_val:
+                                m_val = m_val.split(".")[0]
+                            if not m_val.isdigit():
+                                continue
+                            match_no = int(m_val)
+                        else:
+                            auto_mn += 1
+                            match_no = auto_mn
+                        
+                        t1 = str(row[col_t1]).strip()
+                        t2 = str(row[col_t2]).strip()
+                        s1 = row[col_s1]
+                        s2 = row[col_s2]
+                        
+                        if pd.notna(s1) and pd.notna(s2):
+                            preds[match_no] = {
+                                "team1": t1,
+                                "team2": t2,
+                                "score1": int(s1),
+                                "score2": int(s2),
+                            }
+                    except Exception:
+                        pass
+                        
+                # Predicted overall winner
+                winner = None
+                for r_idx in range(len(raw)):
+                    for c_idx in range(len(raw.columns)):
+                        val = str(raw.iloc[r_idx, c_idx]).strip().lower()
+                        if "winning team" in val or "champion" in val:
+                            if c_idx + 1 < len(raw.columns):
+                                w_val = raw.iloc[r_idx, c_idx + 1]
+                                if pd.notna(w_val) and str(w_val).strip():
+                                    winner = str(w_val).strip()
+                                    break
+                    if winner:
+                        break
+                        
+                players[sheet] = {"predictions": preds, "winning_team_pick": winner}
+            except Exception:
+                pass
+                
+        return players
+    except Exception:
+        return {}
+
+
+def extract_fixtures(players):
+    """Derive the canonical fixture list (match_no -> team1/team2) by
+    scanning all players' predictions. Uses the most common team1/team2
+    pairing seen for each match number, so it still works if one sheet
+    has a typo or a missing row.
+    """
+    from collections import Counter
+
+    fixture_votes = {}
+    for data in players.values():
+        for match_no, pred in data["predictions"].items():
+            key = (pred["team1"], pred["team2"])
+            fixture_votes.setdefault(match_no, Counter())[key] += 1
+
+    fixtures = {}
+    for match_no, counter in fixture_votes.items():
+        (team1, team2), _ = counter.most_common(1)[0]
+        fixtures[match_no] = {"team1": team1, "team2": team2}
+
+    return dict(sorted(fixtures.items()))
+
+
+def score_player(predictions, actual_results):
+    """Score a single player's predictions against actual_results.
+
+    actual_results: dict {match_no: {"team1":..., "team2":...,
+                                       "score1": int|None, "score2": int|None}}
+                     Only matches with non-None scores are scored.
+
+    Returns dict with total_points, exact_scores (count), and per-match breakdown.
+    """
+    total = 0
+    exact_count = 0
+    breakdown = []
+
+    for match_no, actual in actual_results.items():
+        if actual.get("score1") is None or actual.get("score2") is None:
+            continue  # match not yet played / result not entered
+
+        pred = predictions.get(match_no)
+
+        if pred is None:
+            breakdown.append({
+                "match_no": match_no,
+                "fixture": f"{actual['team1']} vs {actual['team2']}",
+                "predicted": "—",
+                "actual": f"{actual['score1']}-{actual['score2']}",
+                "points": 0,
+                "exact": False,
+                "result_correct": False,
+            })
+            continue
+
+        pred_outcome = _outcome(pred["score1"], pred["score2"])
+        actual_outcome = _outcome(actual["score1"], actual["score2"])
+
+        points = 0
+        exact = False
+        result_correct = pred_outcome == actual_outcome
+
+        if pred["score1"] == actual["score1"] and pred["score2"] == actual["score2"]:
+            points += EXACT_SCORE_POINTS
+            exact = True
+            exact_count += 1
+        elif result_correct:
+            points += CORRECT_RESULT_POINTS
+
+        total += points
+
+        breakdown.append({
+            "match_no": match_no,
+            "fixture": f"{actual['team1']} vs {actual['team2']}",
+            "predicted": f"{pred['score1']}-{pred['score2']}",
+            "actual": f"{actual['score1']}-{actual['score2']}",
+            "points": points,
+            "exact": exact,
+            "result_correct": result_correct,
+        })
+
+    return {"total_points": total, "exact_scores": exact_count, "breakdown": breakdown}
+
+
+def build_leaderboard(players, actual_results):
+    """Return a ranked leaderboard DataFrame with tie-break applied.
+
+    players: output of load_predictions()
+    actual_results: dict of match_no -> {team1, team2, score1, score2}
+    """
+    rows = []
+    for name, data in players.items():
+        result = score_player(data["predictions"], actual_results)
+        rows.append({
+            "Player": name,
+            "Points": result["total_points"],
+            "Exact Scores": result["exact_scores"],
+            "Predicted Champion": data["winning_team_pick"] or "-",
+        })
+
+    df = pd.DataFrame(rows)
+
+    if df.empty:
+        return df
+
+    # Sort: Points desc, then Exact Scores desc (tie-breaker)
+    df = df.sort_values(by=["Points", "Exact Scores"], ascending=[False, False]).reset_index(drop=True)
+
+    # Rank with shared-rank for ties on (Points, Exact Scores)
+    ranks = []
+    rank = 1
+    for i in range(len(df)):
+        if i > 0:
+            prev = df.iloc[i - 1]
+            curr = df.iloc[i]
+            if not (curr["Points"] == prev["Points"] and curr["Exact Scores"] == prev["Exact Scores"]):
+                rank = i + 1
+        ranks.append(rank)
+    df.insert(0, "Rank", ranks)
+
+    return df
+
+
+def detailed_breakdown(players, actual_results):
+    """Return dict: player -> breakdown list (per-match)."""
+    out = {}
+    for name, data in players.items():
+        out[name] = score_player(data["predictions"], actual_results)["breakdown"]
+    return out

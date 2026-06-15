@@ -1,0 +1,6 @@
+streamlit
+pandas
+matplotlib
+openpyxl
+requests
+markitdown
