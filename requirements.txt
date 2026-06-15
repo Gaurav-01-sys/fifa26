@@ -4,3 +4,5 @@ matplotlib
 openpyxl
 requests
 markitdown
+openai
+python-dotenv

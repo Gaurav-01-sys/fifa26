@@ -21,7 +21,18 @@ def file_to_markdown(file_data, filename: str = "", api_key: str = "") -> str:
     """
     from markitdown import MarkItDown
     
-    md = MarkItDown()
+    if api_key and api_key.strip():
+        try:
+            from openai import OpenAI
+            client = OpenAI(
+                base_url="https://integrate.api.nvidia.com/v1",
+                api_key=api_key.strip()
+            )
+            md = MarkItDown(llm_client=client, llm_model="meta/llama-3.2-90b-vision-instruct")
+        except Exception:
+            md = MarkItDown()
+    else:
+        md = MarkItDown()
 
     ext = ""
     if filename and "." in filename:

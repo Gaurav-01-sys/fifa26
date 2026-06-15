@@ -12,10 +12,13 @@ Nothing is hardcoded:
 import hashlib
 import json
 from io import BytesIO
-
+import os
+from dotenv import load_dotenv
 import pandas as pd
 import streamlit as st
 import matplotlib.pyplot as plt
+
+load_dotenv()
 
 from scoring import (
     load_predictions,
@@ -77,13 +80,8 @@ if all_uploads:
 
 st.sidebar.markdown("### 2️⃣ Live Match Results")
 
-api_token = st.sidebar.text_input(
-    "API token (X-Auth-Token)",
-    value="108d1cd26d6640d9ab4255b7ade01dd7",
-    type="password",
-    key="fd_api_token",
-    help="Free key from football-data.org. Free tier covers the World Cup (WC) competition.",
-)
+# Load football-data.org API token from environment
+api_token = os.getenv("FOOTBALL_DATA_API_TOKEN", "")
 
 if st.sidebar.button("🔄 Refresh Live Scores", help="Fetch the latest match results from football-data.org"):
     st.cache_data.clear()
@@ -153,6 +151,41 @@ if cache_key not in st.session_state:
 
 players = st.session_state[cache_key]
 
+if players:
+    with st.sidebar.expander("💾 Export Combined Predictions"):
+        st.markdown("Download all predictions merged into a single workbook.")
+        
+        output = BytesIO()
+        with pd.ExcelWriter(output, engine='openpyxl') as writer:
+            for p_name, p_data in players.items():
+                safe_name = str(p_name)[:31]
+                rows = []
+                for m_no, p_pred in p_data.get("predictions", {}).items():
+                    rows.append({
+                        "Match No.": m_no,
+                        "Team 1": p_pred["team1"],
+                        "Team 1 Score": p_pred["score1"],
+                        "Team 2 Score": p_pred["score2"],
+                        "Team 2": p_pred["team2"]
+                    })
+                df = pd.DataFrame(rows)
+                if p_data.get("winning_team_pick"):
+                    df = pd.concat([df, pd.DataFrame([{"Team 1": "Winning Team", "Team 1 Score": p_data["winning_team_pick"]}])], ignore_index=True)
+                
+                if not df.empty:
+                    df.to_excel(writer, index=False, sheet_name=safe_name)
+                else:
+                    # Create empty sheet if no valid predictions
+                    pd.DataFrame([{"Message": "No predictions parsed"}]).to_excel(writer, index=False, sheet_name=safe_name)
+        
+        excel_data = output.getvalue()
+        
+        st.download_button(
+            label="⬇️ Download Combined.xlsx",
+            data=excel_data,
+            file_name="Combined_Predictions.xlsx",
+            mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
+        )
 # ---------------------------------------------------------------------------
 # Debug panel (shows raw markdown + parsed predictions)
 # ---------------------------------------------------------------------------
@@ -236,6 +269,40 @@ elif fetched_count > 0:
 st.subheader("📋 Enter / Edit Actual Results")
 st.caption("Fixtures below are auto-fetched from football-data.org but can be manually edited. "
            "Any edits you make will instantly update the leaderboard.")
+
+actual_img = st.file_uploader("📸 Auto-Fill from Screenshot (OCR)", type=["png", "jpg", "jpeg"], help="Upload an image of actual scores to automatically extract and fill them.")
+if actual_img and st.button("Extract Scores"):
+    with st.spinner("Extracting scores using AI Vision..."):
+        try:
+            from llm_parser import file_to_markdown, _parse_sheet
+            from live_results import _normalize
+            NV_API_KEY = os.getenv("NVIDIA_API_KEY", "")
+            actual_img.seek(0)
+            md_text = file_to_markdown(actual_img, filename=actual_img.name, api_key=NV_API_KEY)
+            
+            res = _parse_sheet("actuals", md_text)
+            new_preds = res.get("predictions", {})
+            
+            updates = 0
+            for mn, data in new_preds.items():
+                t1 = _normalize(data["team1"])
+                t2 = _normalize(data["team2"])
+                
+                for am, ad in st.session_state.actual_results.items():
+                    at1 = _normalize(ad["team1"])
+                    at2 = _normalize(ad["team2"])
+                    
+                    if (t1 == at1 and t2 == at2) or (t1 in at1 and t2 in at2) or (at1 in t1 and at2 in t2):
+                        st.session_state.actual_results[am]["score1"] = data["score1"]
+                        st.session_state.actual_results[am]["score2"] = data["score2"]
+                        updates += 1
+                        break
+            if updates > 0:
+                st.success(f"Successfully extracted {updates} match scores from the screenshot!")
+            else:
+                st.warning("Found a table but couldn't match any teams to the fixtures.")
+        except Exception as e:
+            st.error(f"OCR failed: {e}")
 
 results_table = pd.DataFrame([
     {
