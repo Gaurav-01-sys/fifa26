@@ -77,15 +77,7 @@ if all_uploads:
 
 st.sidebar.markdown("### 2️⃣ Live Match Results")
 
-api_token = st.sidebar.text_input(
-    "API token (X-Auth-Token)",
-    value="108d1cd26d6640d9ab4255b7ade01dd7",
-    type="password",
-    key="fd_api_token",
-    help="Free key from football-data.org. Free tier covers the World Cup (WC) competition.",
-)
-
-if st.sidebar.button("🔄 Refresh Live Scores", help="Fetch the latest match results from the API"):
+if st.sidebar.button("🔄 Refresh Live Scores", help="Fetch the latest match results from ESPN"):
     st.cache_data.clear()
     st.rerun()
 
@@ -197,29 +189,25 @@ fixtures = extract_fixtures(players)
 # Fetch and merge live results (Auto-fetched)
 # ---------------------------------------------------------------------------
 @st.cache_data(ttl=300) # 5 min cache
-def fetch_and_merge_live_results(token, _fixtures):
+def fetch_and_merge_live_results(_fixtures):
     ar = {
         m: {"team1": f["team1"], "team2": f["team2"], "score1": None, "score2": None}
         for m, f in _fixtures.items()
     }
-    if not token:
-        return ar, 0, 0, "No API token provided."
     
     try:
-        from live_results import fetch_world_cup_matches, matches_to_results, merge_into_actual_results
-        raw_matches = fetch_world_cup_matches(token)
-        api_results = matches_to_results(raw_matches)
+        from espn_results import fetch_espn_matches, espn_matches_to_results, merge_into_actual_results
+        raw_matches = fetch_espn_matches()
+        api_results = espn_matches_to_results(raw_matches)
         ar, unmatched = merge_into_actual_results(ar, api_results)
         return ar, len(raw_matches), unmatched, None
     except Exception as e:
         return ar, 0, 0, str(e)
 
-st.session_state.actual_results, fetched_count, unmatched_count, api_error = fetch_and_merge_live_results(
-    api_token, fixtures
-)
+st.session_state.actual_results, fetched_count, unmatched_count, api_error = fetch_and_merge_live_results(fixtures)
 
-if api_error and api_token:
-    st.sidebar.error(f"API fetch failed: {api_error}")
+if api_error:
+    st.sidebar.error(f"ESPN fetch failed: {api_error}")
 elif fetched_count > 0:
     filled = sum(
         1 for v in st.session_state.actual_results.values()
@@ -234,7 +222,7 @@ elif fetched_count > 0:
 # Section: Show Actual Results
 # ---------------------------------------------------------------------------
 st.subheader("📋 Enter / Edit Actual Results")
-st.caption("Fixtures below are auto-fetched from football-data.org but can be manually edited. "
+st.caption("Fixtures below are auto-fetched from ESPN but can be manually edited. "
            "Any edits you make will instantly update the leaderboard.")
 
 results_table = pd.DataFrame([
