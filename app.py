@@ -270,7 +270,9 @@ st.subheader("📋 Enter / Edit Actual Results")
 st.caption("Fixtures below are auto-fetched from football-data.org but can be manually edited. "
            "Any edits you make will instantly update the leaderboard.")
 
-actual_img = st.file_uploader("📸 Auto-Fill from Screenshot (OCR)", type=["png", "jpg", "jpeg"], help="Upload an image of actual scores to automatically extract and fill them.")
+actual_img = st.file_uploader("📸 Auto-Fill from Screenshot (OCR)", type=["png", "jpg", "jpeg"], help="Drag and drop or paste (Ctrl+V) an image.")
+st.caption("💡 **Tip**: You can take a screenshot, click the box above, and press **Ctrl+V** (or Cmd+V) to paste it directly!")
+
 if actual_img and st.button("Extract Scores"):
     with st.spinner("Extracting scores using AI Vision..."):
         try:
