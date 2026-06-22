@@ -382,9 +382,48 @@ def score_player(predictions, actual_results):
         if actual.get("score1") is None or actual.get("score2") is None:
             continue  # match not yet played / result not entered
 
-        pred = predictions.get(match_no)
+        from live_results import _normalize
+        act_t1 = _normalize(actual.get("team1", ""))
+        act_t2 = _normalize(actual.get("team2", ""))
 
-        if pred is None:
+        pred_found = False
+        pred_s1, pred_s2 = None, None
+
+        # 1. Try looking up by match_no first, but VERIFY the teams match
+        pred = predictions.get(match_no)
+        if pred is not None:
+            pred_t1 = _normalize(pred.get("team1", ""))
+            pred_t2 = _normalize(pred.get("team2", ""))
+            
+            if (pred_t1 == act_t1 or act_t1 in pred_t1 or pred_t1 in act_t1) and \
+               (pred_t2 == act_t2 or act_t2 in pred_t2 or pred_t2 in act_t2):
+                pred_s1, pred_s2 = pred["score1"], pred["score2"]
+                pred_found = True
+            elif (pred_t1 == act_t2 or act_t2 in pred_t1 or pred_t1 in act_t2) and \
+                 (pred_t2 == act_t1 or act_t1 in pred_t2 or pred_t2 in act_t1):
+                # Swapped order
+                pred_s1, pred_s2 = pred["score2"], pred["score1"]
+                pred_found = True
+
+        # 2. If match_no had different teams (or was missing), search ALL predictions
+        if not pred_found:
+            for p_match_no, p_pred in predictions.items():
+                p_t1 = _normalize(p_pred.get("team1", ""))
+                p_t2 = _normalize(p_pred.get("team2", ""))
+                
+                if (p_t1 == act_t1 or act_t1 in p_t1 or p_t1 in act_t1) and \
+                   (p_t2 == act_t2 or act_t2 in p_t2 or p_t2 in act_t2):
+                    pred_s1, pred_s2 = p_pred["score1"], p_pred["score2"]
+                    pred_found = True
+                    break
+                elif (p_t1 == act_t2 or act_t2 in p_t1 or p_t1 in act_t2) and \
+                     (p_t2 == act_t1 or act_t1 in p_t2 or p_t2 in act_t1):
+                    # Swapped order
+                    pred_s1, pred_s2 = p_pred["score2"], p_pred["score1"]
+                    pred_found = True
+                    break
+
+        if not pred_found:
             breakdown.append({
                 "match_no": match_no,
                 "fixture": f"{actual['team1']} vs {actual['team2']}",
@@ -395,22 +434,6 @@ def score_player(predictions, actual_results):
                 "result_correct": False,
             })
             continue
-
-        # Order-agnostic: detect if the player's sheet has teams in the
-        # opposite order (e.g., "Egypt vs NZ" instead of "NZ vs Egypt").
-        # If so, swap the predicted scores before comparing.
-        from live_results import _normalize
-        pred_t1 = _normalize(pred.get("team1", ""))
-        pred_t2 = _normalize(pred.get("team2", ""))
-        act_t1 = _normalize(actual.get("team1", ""))
-        act_t2 = _normalize(actual.get("team2", ""))
-
-        pred_s1, pred_s2 = pred["score1"], pred["score2"]
-        # If the prediction has teams swapped relative to actual
-        if (pred_t1 == act_t2 or act_t2 in pred_t1 or pred_t1 in act_t2) and \
-           (pred_t2 == act_t1 or act_t1 in pred_t2 or pred_t2 in act_t1) and \
-           pred_t1 != act_t1:
-            pred_s1, pred_s2 = pred_s2, pred_s1
 
         pred_outcome = _outcome(pred_s1, pred_s2)
         actual_outcome = _outcome(actual["score1"], actual["score2"])
