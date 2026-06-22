@@ -270,8 +270,10 @@ st.subheader("📋 Enter / Edit Actual Results")
 st.caption("Fixtures below are auto-fetched from football-data.org but can be manually edited. "
            "Any edits you make will instantly update the leaderboard.")
 
-actual_img = st.file_uploader("📸 Auto-Fill from Screenshot (OCR)", type=["png", "jpg", "jpeg"], help="Drag and drop or paste (Ctrl+V) an image.")
-st.caption("💡 **Tip**: You can take a screenshot, click the box above, and press **Ctrl+V** (or Cmd+V) to paste it directly!")
+col1, col2 = st.columns(2)
+with col1:
+    actual_img = st.file_uploader("📸 Auto-Fill from Screenshot (OCR)", type=["png", "jpg", "jpeg"], help="Drag and drop or paste (Ctrl+V) an image.")
+    st.caption("💡 **Tip**: You can take a screenshot, click the box above, and press **Ctrl+V** (or Cmd+V) to paste it directly!")
 
 if actual_img and st.button("Extract Scores"):
     with st.spinner("Extracting scores using AI Vision..."):
@@ -305,6 +307,26 @@ if actual_img and st.button("Extract Scores"):
                 st.warning("Found a table but couldn't match any teams to the fixtures.")
         except Exception as e:
             st.error(f"OCR failed: {e}")
+
+with col2:
+    st.markdown("**🌐 Fetch Missing Scores (Web Search)**")
+    st.caption("Automatically find missing scores using a free sports API.")
+    if st.button("Fetch Missing Scores"):
+        with st.spinner("Searching the web for missing scores..."):
+            from live_results import fetch_score_from_web
+            updates = 0
+            for am, ad in st.session_state.actual_results.items():
+                if ad.get("score1") is None or ad.get("score2") is None:
+                    s1, s2 = fetch_score_from_web(ad["team1"], ad["team2"])
+                    if s1 is not None and s2 is not None:
+                        st.session_state.actual_results[am]["score1"] = s1
+                        st.session_state.actual_results[am]["score2"] = s2
+                        updates += 1
+            if updates > 0:
+                st.success(f"Successfully fetched {updates} match scores from the web!")
+                st.rerun()
+            else:
+                st.warning("Couldn't find any missing scores on the web.")
 
 results_table = pd.DataFrame([
     {

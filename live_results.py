@@ -136,3 +136,42 @@ def merge_into_actual_results(actual_results, api_matches):
             fixture["score2"] = api_match["score2"]
 
     return actual_results, unmatched
+
+
+def fetch_score_from_web(team1, team2):
+    """Fallback: Fetch score via TheSportsDB free API. No API key needed.
+    Returns (score1, score2) or (None, None).
+    """
+    url = "https://www.thesportsdb.com/api/v1/json/3/searchevents.php"
+    params = {
+        "e": f"{team1}_vs_{team2}"
+    }
+    
+    try:
+        resp = requests.get(url, params=params, timeout=15)
+        resp.raise_for_status()
+        res = resp.json()
+        
+        if res.get("event"):
+            # We just take the first matched event
+            event = res["event"][0]
+            s1_raw = event.get("intHomeScore")
+            s2_raw = event.get("intAwayScore")
+            
+            if s1_raw is not None and s2_raw is not None:
+                # Align teams
+                t1_home = event.get("strHomeTeam", "")
+                t2_away = event.get("strAwayTeam", "")
+                
+                t1_norm = _normalize(team1)
+                t2_norm = _normalize(team2)
+                
+                if t1_norm in _normalize(t2_away) or t2_norm in _normalize(t1_home):
+                    return int(s2_raw), int(s1_raw)
+                else:
+                    return int(s1_raw), int(s2_raw)
+                        
+    except Exception as e:
+        print(f"TheSportsDB Error for {team1} vs {team2}: {e}")
+        
+    return None, None
