@@ -272,8 +272,20 @@ if (
     _ar, fetched_count, unmatched_count, api_error = fetch_and_merge_live_results(
         api_token, fixtures
     )
+    # Auto-fetch any remaining missing scores from TheSportsDB (free, no key)
+    from live_results import fetch_score_from_web
+    auto_fetched = 0
+    for am, ad in _ar.items():
+        if ad.get("score1") is None or ad.get("score2") is None:
+            s1, s2 = fetch_score_from_web(ad["team1"], ad["team2"])
+            if s1 is not None and s2 is not None:
+                _ar[am]["score1"] = s1
+                _ar[am]["score2"] = s2
+                auto_fetched += 1
     st.session_state.actual_results = _ar
     st.session_state._fixtures_hash = _fixtures_hash
+    if auto_fetched > 0:
+        st.sidebar.info(f"🌐 Auto-fetched {auto_fetched} scores from TheSportsDB")
 else:
     fetched_count, unmatched_count, api_error = 0, 0, None
 

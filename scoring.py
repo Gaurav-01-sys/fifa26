@@ -396,14 +396,30 @@ def score_player(predictions, actual_results):
             })
             continue
 
-        pred_outcome = _outcome(pred["score1"], pred["score2"])
+        # Order-agnostic: detect if the player's sheet has teams in the
+        # opposite order (e.g., "Egypt vs NZ" instead of "NZ vs Egypt").
+        # If so, swap the predicted scores before comparing.
+        from live_results import _normalize
+        pred_t1 = _normalize(pred.get("team1", ""))
+        pred_t2 = _normalize(pred.get("team2", ""))
+        act_t1 = _normalize(actual.get("team1", ""))
+        act_t2 = _normalize(actual.get("team2", ""))
+
+        pred_s1, pred_s2 = pred["score1"], pred["score2"]
+        # If the prediction has teams swapped relative to actual
+        if (pred_t1 == act_t2 or act_t2 in pred_t1 or pred_t1 in act_t2) and \
+           (pred_t2 == act_t1 or act_t1 in pred_t2 or pred_t2 in act_t1) and \
+           pred_t1 != act_t1:
+            pred_s1, pred_s2 = pred_s2, pred_s1
+
+        pred_outcome = _outcome(pred_s1, pred_s2)
         actual_outcome = _outcome(actual["score1"], actual["score2"])
 
         points = 0
         exact = False
         result_correct = pred_outcome == actual_outcome
 
-        if pred["score1"] == actual["score1"] and pred["score2"] == actual["score2"]:
+        if pred_s1 == actual["score1"] and pred_s2 == actual["score2"]:
             points += EXACT_SCORE_POINTS
             exact = True
             exact_count += 1
@@ -416,7 +432,7 @@ def score_player(predictions, actual_results):
         breakdown.append({
             "match_no": match_no,
             "fixture": f"{actual['team1']} vs {actual['team2']}",
-            "predicted": f"{pred['score1']}-{pred['score2']}",
+            "predicted": f"{pred_s1}-{pred_s2}",
             "actual": f"{actual['score1']}-{actual['score2']}",
             "points": points,
             "exact": exact,
