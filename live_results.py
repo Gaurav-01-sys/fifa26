@@ -138,40 +138,82 @@ def merge_into_actual_results(actual_results, api_matches):
     return actual_results, unmatched
 
 
+# TheSportsDB uses different team names than the prediction sheets.
+# Map our normalized names -> TheSportsDB names.
+SPORTSDB_ALIASES = {
+    "czechia": "Czech Republic",
+    "czech republic": "Czech Republic",
+    "bosnia and herzegovina": "Bosnia-Herzegovina",
+    "bosnia & herzegovina": "Bosnia-Herzegovina",
+    "bosnia": "Bosnia-Herzegovina",
+    "côte d'ivoire": "Ivory Coast",
+    "cote d'ivoire": "Ivory Coast",
+    "ivory coast": "Ivory Coast",
+    "türkiye": "Turkey",
+    "turkiye": "Turkey",
+    "trkiye": "Turkey",
+    "south korea": "South Korea",
+    "korea republic": "South Korea",
+    "usa": "USA",
+    "united states": "USA",
+    "cape verde": "Cape Verde",
+    "cabo verde": "Cape Verde",
+    "curacao": "Curacao",
+    "curaçao": "Curacao",
+    "curaao": "Curacao",
+}
+
+
+def _to_sportsdb_name(name):
+    """Translate a team name to its TheSportsDB equivalent."""
+    norm = (name or "").strip().lower()
+    norm = norm.replace(".", "").replace("\u2019", "'").replace("\u00e9", "e")
+    return SPORTSDB_ALIASES.get(norm, name.strip())
+
+
+def _search_sportsdb(t1, t2):
+    """Single search attempt against TheSportsDB. Returns (score1, score2) or (None, None)."""
+    url = "https://www.thesportsdb.com/api/v1/json/3/searchevents.php"
+    resp = requests.get(url, params={"e": f"{t1} vs {t2}"}, timeout=15)
+    resp.raise_for_status()
+    res = resp.json()
+    if res.get("event"):
+        event = res["event"][0]
+        s1_raw = event.get("intHomeScore")
+        s2_raw = event.get("intAwayScore")
+        if s1_raw is not None and s2_raw is not None:
+            db_home = _normalize(event.get("strHomeTeam", ""))
+            t1_norm = _normalize(t1)
+            t2_norm = _normalize(t2)
+            # If the result is stored reversed (t1=away, t2=home), flip the scores
+            if t2_norm in db_home and t1_norm not in db_home:
+                return int(s2_raw), int(s1_raw)
+            return int(s1_raw), int(s2_raw)
+    return None, None
+
+
 def fetch_score_from_web(team1, team2):
     """Fallback: Fetch score via TheSportsDB free API. No API key needed.
+    Tries multiple name aliases and both team orderings.
     Returns (score1, score2) or (None, None).
     """
-    url = "https://www.thesportsdb.com/api/v1/json/3/searchevents.php"
-    params = {
-        "e": f"{team1}_vs_{team2}"
-    }
-    
+    db_t1 = _to_sportsdb_name(team1)
+    db_t2 = _to_sportsdb_name(team2)
+
     try:
-        resp = requests.get(url, params=params, timeout=15)
-        resp.raise_for_status()
-        res = resp.json()
-        
-        if res.get("event"):
-            # We just take the first matched event
-            event = res["event"][0]
-            s1_raw = event.get("intHomeScore")
-            s2_raw = event.get("intAwayScore")
-            
-            if s1_raw is not None and s2_raw is not None:
-                # Align teams
-                t1_home = event.get("strHomeTeam", "")
-                t2_away = event.get("strAwayTeam", "")
-                
-                t1_norm = _normalize(team1)
-                t2_norm = _normalize(team2)
-                
-                if t1_norm in _normalize(t2_away) or t2_norm in _normalize(t1_home):
-                    return int(s2_raw), int(s1_raw)
-                else:
-                    return int(s1_raw), int(s2_raw)
-                        
+        # Attempt 1: normal order
+        s1, s2 = _search_sportsdb(db_t1, db_t2)
+        if s1 is not None:
+            return s1, s2
+
+        # Attempt 2: swapped order (some fixtures stored with home/away reversed)
+        s1, s2 = _search_sportsdb(db_t2, db_t1)
+        if s1 is not None:
+            # scores come back in the db's perspective; since we searched t2 vs t1,
+            # the home score = t2's score and away score = t1's score
+            return s2, s1
+
     except Exception as e:
         print(f"TheSportsDB Error for {team1} vs {team2}: {e}")
-        
+
     return None, None
