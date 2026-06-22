@@ -386,11 +386,12 @@ def render_table_image(df, title, columns, figsize=(7, None)):
     fig, ax = plt.subplots(figsize=figsize)
     ax.axis("off")
 
-    display_df = df[columns].copy()
+    existing_cols = [c for c in columns if c in df.columns]
+    display_df = df[existing_cols].copy()
 
     table = ax.table(
         cellText=display_df.values,
-        colLabels=columns,
+        colLabels=existing_cols,
         cellLoc="center",
         loc="center",
     )
