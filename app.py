@@ -378,17 +378,19 @@ st.subheader("🖼️ Shareable Points Table (Image)")
 
 title_input = st.text_input("Title for the table image", value="Updated Points Table")
 
-def render_table_image(df, title):
+def render_table_image(df, title, columns, figsize=(7, None)):
     n = len(df)
     fig_height = 0.5 * n + 1.2
-    fig, ax = plt.subplots(figsize=(5, fig_height))
+    if figsize[1] is None:
+        figsize = (figsize[0], fig_height)
+    fig, ax = plt.subplots(figsize=figsize)
     ax.axis("off")
 
-    display_df = df[["Player", "Points"]].copy()
+    display_df = df[columns].copy()
 
     table = ax.table(
         cellText=display_df.values,
-        colLabels=["Player", "Points"],
+        colLabels=columns,
         cellLoc="center",
         loc="center",
     )
@@ -411,7 +413,7 @@ def render_table_image(df, title):
     return fig
 
 if not leaderboard.empty:
-    fig = render_table_image(leaderboard, title_input)
+    fig = render_table_image(leaderboard, title_input, ["Player", "Points", "Exact Scores", "Correct Outcomes"], figsize=(8, None))
     st.pyplot(fig)
 
     buf = BytesIO()
@@ -436,6 +438,21 @@ if not leaderboard.empty:
         bd_display = bd[["match_no", "fixture", "predicted", "actual", "points"]]
         bd_display.columns = ["Match", "Fixture", "Predicted", "Actual", "Points"]
         st.dataframe(bd_display, hide_index=True, use_container_width=True)
+        
+        st.subheader("🖼️ Shareable Breakdown Image")
+        breakdown_title = f"{selected} - Predictions Breakdown"
+        fig_bd = render_table_image(bd_display, breakdown_title, ["Match", "Fixture", "Predicted", "Actual", "Points"], figsize=(9, None))
+        st.pyplot(fig_bd)
+        
+        buf_bd = BytesIO()
+        fig_bd.savefig(buf_bd, format="png", dpi=200, bbox_inches="tight")
+        buf_bd.seek(0)
+        st.download_button(
+            "📥 Download Breakdown Image",
+            data=buf_bd,
+            file_name=f"{selected}_Breakdown.png",
+            mime="image/png",
+        )
     else:
         st.info("No scored matches yet for this player.")
 

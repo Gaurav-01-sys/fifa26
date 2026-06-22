@@ -352,6 +352,7 @@ def score_player(predictions, actual_results):
     """
     total = 0
     exact_count = 0
+    correct_result_count = 0
     breakdown = []
 
     for match_no, actual in actual_results.items():
@@ -385,6 +386,7 @@ def score_player(predictions, actual_results):
             exact_count += 1
         elif result_correct:
             points += CORRECT_RESULT_POINTS
+            correct_result_count += 1
 
         total += points
 
@@ -398,7 +400,7 @@ def score_player(predictions, actual_results):
             "result_correct": result_correct,
         })
 
-    return {"total_points": total, "exact_scores": exact_count, "breakdown": breakdown}
+    return {"total_points": total, "exact_scores": exact_count, "correct_results": correct_result_count, "breakdown": breakdown}
 
 
 def build_leaderboard(players, actual_results):
@@ -414,6 +416,7 @@ def build_leaderboard(players, actual_results):
             "Player": name,
             "Points": result["total_points"],
             "Exact Scores": result["exact_scores"],
+            "Correct Outcomes": result["correct_results"],
             "Predicted Champion": data["winning_team_pick"] or "-",
         })
 
