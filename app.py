@@ -224,7 +224,19 @@ if not players:
              "Check that each sheet has a 'Match No.' header row.")
     st.stop()
 
-fixtures = extract_fixtures(players)
+fixtures, fixture_duplicates = extract_fixtures(players)
+
+if fixture_duplicates:
+    dup_msgs = [
+        f"Match **{dup_no}** (same as Match {kept_no}): {t1} vs {t2}"
+        for dup_no, t1, t2, kept_no in fixture_duplicates
+    ]
+    st.warning(
+        "⚠️ **Duplicate fixtures detected and removed:**\n\n"
+        + "\n\n".join(f"- {m}" for m in dup_msgs)
+        + "\n\nPlease fix the match numbers in your Excel file."
+    )
+
 
 # ---------------------------------------------------------------------------
 # Fetch and merge live results (Auto-fetched)

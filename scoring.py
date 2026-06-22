@@ -324,6 +324,14 @@ def extract_fixtures(players):
     scanning all players' predictions. Uses the most common team1/team2
     pairing seen for each match number, so it still works if one sheet
     has a typo or a missing row.
+
+    Deduplicates: if the same (team1, team2) pair appears under multiple
+    match numbers, only the lowest match number is kept. The app can display
+    a warning for the removed duplicates.
+
+    Returns (fixtures_dict, duplicate_warnings_list).
+    For backwards compatibility a plain call to extract_fixtures() still works;
+    callers that want duplicate info should unpack two values.
     """
     from collections import Counter
 
@@ -333,12 +341,27 @@ def extract_fixtures(players):
             key = (pred["team1"], pred["team2"])
             fixture_votes.setdefault(match_no, Counter())[key] += 1
 
-    fixtures = {}
+    # Pick the most-common pairing for each match number
+    raw = {}
     for match_no, counter in fixture_votes.items():
         (team1, team2), _ = counter.most_common(1)[0]
-        fixtures[match_no] = {"team1": team1, "team2": team2}
+        raw[match_no] = {"team1": team1, "team2": team2}
 
-    return dict(sorted(fixtures.items()))
+    # Deduplicate: collapse identical (team1, team2) pairs to the first match_no
+    seen_pairs = {}   # (team1, team2) -> first match_no seen
+    duplicates = []   # list of (removed_match_no, team1, team2, kept_match_no)
+    fixtures = {}
+    for match_no in sorted(raw.keys()):
+        entry = raw[match_no]
+        pair = (entry["team1"], entry["team2"])
+        if pair in seen_pairs:
+            duplicates.append((match_no, entry["team1"], entry["team2"], seen_pairs[pair]))
+        else:
+            seen_pairs[pair] = match_no
+            fixtures[match_no] = entry
+
+    return fixtures, duplicates
+
 
 
 def score_player(predictions, actual_results):
