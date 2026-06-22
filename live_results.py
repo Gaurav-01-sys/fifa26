@@ -30,7 +30,15 @@ NAME_ALIASES = {
     "czech republic": "czechia",
     "ivory coast": "cote d'ivoire",
     "côte d'ivoire": "cote d'ivoire",
+    "cte d'ivoire": "cote d'ivoire",
     "cape verde": "cabo verde",
+    "curaçao": "curacao",
+    "curaao": "curacao",
+    "türkiye": "turkey",
+    "trkiye": "turkey",
+    "turkiye": "turkey",
+    "holland": "netherlands",
+    "iran": "ir iran",
 }
 
 
