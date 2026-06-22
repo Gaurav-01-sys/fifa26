@@ -247,9 +247,23 @@ def fetch_and_merge_live_results(token, _fixtures):
     except Exception as e:
         return ar, 0, 0, str(e)
 
-st.session_state.actual_results, fetched_count, unmatched_count, api_error = fetch_and_merge_live_results(
-    api_token, fixtures
-)
+# Only initialize actual_results when fixtures change (e.g. new file uploaded).
+# Otherwise preserve existing session state so manual edits and web-fetched
+# scores are not wiped out on every Streamlit rerun.
+import hashlib as _hl
+_fixtures_hash = _hl.md5(str(sorted(fixtures.items())).encode()).hexdigest()
+
+if (
+    "actual_results" not in st.session_state
+    or st.session_state.get("_fixtures_hash") != _fixtures_hash
+):
+    _ar, fetched_count, unmatched_count, api_error = fetch_and_merge_live_results(
+        api_token, fixtures
+    )
+    st.session_state.actual_results = _ar
+    st.session_state._fixtures_hash = _fixtures_hash
+else:
+    fetched_count, unmatched_count, api_error = 0, 0, None
 
 if api_error and api_token:
     st.sidebar.error(f"API fetch failed: {api_error}")
@@ -262,6 +276,7 @@ elif fetched_count > 0:
         f"Live results updated! "
         f"({filled} fixtures have scores)."
     )
+
 
 # ---------------------------------------------------------------------------
 # Section: Show Actual Results
