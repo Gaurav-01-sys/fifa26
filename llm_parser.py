@@ -221,17 +221,9 @@ def _parse_sheet(sheet_name: str, sheet_body: str) -> dict:
         except (ValueError, TypeError):
             continue
 
-        # Match number
-        mn_raw = cell("match_no")
-        if mn_raw and mn_raw.lower() not in ("nan", "none", ""):
-            try:
-                match_no = int(float(mn_raw))
-            except (ValueError, TypeError):
-                auto_match_no += 1
-                match_no = auto_match_no
-        else:
-            auto_match_no += 1
-            match_no = auto_match_no
+        # Match number (ignored, just auto-increment)
+        auto_match_no += 1
+        match_no = auto_match_no
 
         preds[match_no] = {
             "team1": team1,

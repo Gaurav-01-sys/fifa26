@@ -165,21 +165,20 @@ def load_predictions(xlsx_path, nvidia_api_key: str = "", progress_callback=None
                     if all(c in "-:| " for c in next_row.replace("|", "").strip()):
                         start_row_offset = 2
                         
+                auto_mn = 0
                 for row in table_rows[header_index + start_row_offset:]:
                     cells = [c.strip() for c in row.split("|")[1:-1]]
-                    if len(cells) <= max(col_match, col_t1, col_t2, col_s1, col_s2):
+                    if len(cells) <= max(col_t1, col_t2, col_s1, col_s2):
                         continue
                     try:
-                        m_val = cells[col_match].replace(",", "").strip()
-                        if not m_val.isdigit():
-                            continue
-                        match_no = int(m_val)
                         t1 = cells[col_t1].strip()
                         t2 = cells[col_t2].strip()
                         s1 = int(cells[col_s1].strip()) if cells[col_s1].strip().isdigit() else None
                         s2 = int(cells[col_s2].strip()) if cells[col_s2].strip().isdigit() else None
                         
                         if s1 is not None and s2 is not None:
+                            auto_mn += 1
+                            match_no = auto_mn
                             preds[match_no] = {
                                 "team1": t1,
                                 "team2": t2,
@@ -270,23 +269,14 @@ def load_predictions(xlsx_path, nvidia_api_key: str = "", progress_callback=None
                 auto_mn = 0
                 for _, row in data.iterrows():
                     try:
-                        if col_match:
-                            m_val = str(row[col_match]).strip()
-                            if "." in m_val:
-                                m_val = m_val.split(".")[0]
-                            if not m_val.isdigit():
-                                continue
-                            match_no = int(m_val)
-                        else:
-                            auto_mn += 1
-                            match_no = auto_mn
-                        
                         t1 = str(row[col_t1]).strip()
                         t2 = str(row[col_t2]).strip()
                         s1 = row[col_s1]
                         s2 = row[col_s2]
                         
                         if pd.notna(s1) and pd.notna(s2):
+                            auto_mn += 1
+                            match_no = auto_mn
                             preds[match_no] = {
                                 "team1": t1,
                                 "team2": t2,
