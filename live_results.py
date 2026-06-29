@@ -277,21 +277,22 @@ def fetch_score_from_web(team1, team2):
     db_t1 = _to_sportsdb_name(team1)
     db_t2 = _to_sportsdb_name(team2)
 
-    try:
-        # Attempt 1: normal order (TheSportsDB)
-        s1, s2, w, m = _search_sportsdb(db_t1, db_t2)
-        if s1 is not None:
-            return s1, s2, w, m
+    # Disabled TheSportsDB as requested, keeping only ESPN
+    # try:
+    #     # Attempt 1: normal order (TheSportsDB)
+    #     s1, s2, w, m = _search_sportsdb(db_t1, db_t2)
+    #     if s1 is not None:
+    #         return s1, s2, w, m
+    #
+    #     # Attempt 2: swapped order (TheSportsDB)
+    #     s1, s2, w, m = _search_sportsdb(db_t2, db_t1)
+    #     if s1 is not None:
+    #         return s2, s1, w, m
+    #         
+    # except Exception as e:
+    #     print(f"TheSportsDB Error for {team1} vs {team2}: {e}")
 
-        # Attempt 2: swapped order (TheSportsDB)
-        s1, s2, w, m = _search_sportsdb(db_t2, db_t1)
-        if s1 is not None:
-            return s2, s1, w, m
-            
-    except Exception as e:
-        print(f"TheSportsDB Error for {team1} vs {team2}: {e}")
-
-    # Attempt 3: ESPN Public API Fallback
+    # ESPN Public API
     s1, s2, w, m = _search_espn(team1, team2)
     if s1 is not None:
         return s1, s2, w, m
