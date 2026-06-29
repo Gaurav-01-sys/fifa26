@@ -107,6 +107,10 @@ _COL_ALIASES = {
     "team 2 score": "score2", "score 2": "score2", "score2": "score2",
     "goals 2": "score2", "team2 score": "score2", "eam 2 scor": "score2", 
     "eam 2 score": "score2", "eam 2 scor ": "score2",
+    # winner
+    "winner": "winner", "winning team": "winner", "match winner": "winner",
+    # method
+    "method": "method", "win method": "method", "winning method": "method", "method ": "method", " method": "method",
 }
 
 
@@ -205,6 +209,8 @@ def _parse_sheet(sheet_name: str, sheet_body: str) -> dict:
         team2 = cell("team2")
         s1_raw = cell("score1")
         s2_raw = cell("score2")
+        winner_val = cell("winner")
+        method_val = cell("method")
 
         # Skip blank or NaN rows
         if not team1 or team1.lower() in ("nan", "none", ""):
@@ -230,6 +236,8 @@ def _parse_sheet(sheet_name: str, sheet_body: str) -> dict:
             "team2": team2,
             "score1": s1,
             "score2": s2,
+            "winner": winner_val,
+            "method": method_val,
         }
 
     return {"predictions": preds, "winning_team_pick": winner}

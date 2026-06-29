@@ -244,7 +244,7 @@ if fixture_duplicates:
 @st.cache_data(ttl=300) # 5 min cache
 def fetch_and_merge_live_results(token, _fixtures):
     ar = {
-        m: {"team1": f["team1"], "team2": f["team2"], "score1": None, "score2": None}
+        m: {"team1": f["team1"], "team2": f["team2"], "score1": None, "score2": None, "winner": None, "method": None}
         for m, f in _fixtures.items()
     }
     if not token:
@@ -374,6 +374,8 @@ results_table = pd.DataFrame([
         "Score 1": d["score1"],
         "Score 2": d["score2"],
         "Team 2": d["team2"],
+        "Winner": d.get("winner"),
+        "Method": d.get("method"),
     }
     for m, d in sorted(st.session_state.actual_results.items())
 ])
@@ -383,6 +385,10 @@ edited_df = st.data_editor(
     use_container_width=True,
     hide_index=True,
     disabled=["Match No", "Team 1", "Team 2"],
+    column_config={
+        "Winner": st.column_config.TextColumn("Winner"),
+        "Method": st.column_config.SelectboxColumn("Method", options=["90 mins", "Extra Time", "Penalties"]),
+    }
 )
 
 # Update session state with manual edits
@@ -390,9 +396,13 @@ for _, row in edited_df.iterrows():
     m = row["Match No"]
     s1 = row["Score 1"]
     s2 = row["Score 2"]
+    w = row.get("Winner")
+    method = row.get("Method")
     if pd.notna(s1) and pd.notna(s2):
         st.session_state.actual_results[m]["score1"] = int(s1)
         st.session_state.actual_results[m]["score2"] = int(s2)
+    st.session_state.actual_results[m]["winner"] = str(w).strip() if pd.notna(w) and str(w).strip() else None
+    st.session_state.actual_results[m]["method"] = str(method).strip() if pd.notna(method) and str(method).strip() else None
 
 played_count = sum(
     1 for v in st.session_state.actual_results.values()

@@ -7,7 +7,8 @@ actual-results input supplied at runtime (via the Streamlit UI).
 import pandas as pd
 
 # Scoring rule constants (only the RULES are fixed, not the data)
-CORRECT_RESULT_POINTS = 2   # winner / draw correctly predicted
+CORRECT_RESULT_POINTS = 2   # winner correctly predicted
+CORRECT_METHOD_POINTS = 2   # correct method prediction
 EXACT_SCORE_POINTS = 5      # exact score correctly predicted
 
 
@@ -144,6 +145,8 @@ def load_predictions(xlsx_path, nvidia_api_key: str = "", progress_callback=None
                 col_t2 = -1
                 col_s1 = -1
                 col_s2 = -1
+                col_winner = -1
+                col_method = -1
                 
                 for idx, h in enumerate(headers):
                     h_lower = h.lower()
@@ -157,6 +160,10 @@ def load_predictions(xlsx_path, nvidia_api_key: str = "", progress_callback=None
                         col_s1 = idx
                     elif "team 2 score" in h_lower or "score 2" in h_lower or ("team 2" in h_lower and "score" in h_lower):
                         col_s2 = idx
+                    elif "winner" in h_lower or "winning team" in h_lower or "match winner" in h_lower:
+                        col_winner = idx
+                    elif "method" in h_lower or "win method" in h_lower:
+                        col_method = idx
                         
                 # Determine data start offset
                 start_row_offset = 1
@@ -175,6 +182,8 @@ def load_predictions(xlsx_path, nvidia_api_key: str = "", progress_callback=None
                         t2 = cells[col_t2].strip()
                         s1 = int(cells[col_s1].strip()) if cells[col_s1].strip().isdigit() else None
                         s2 = int(cells[col_s2].strip()) if cells[col_s2].strip().isdigit() else None
+                        w_val = cells[col_winner].strip() if col_winner != -1 and col_winner < len(cells) else ""
+                        m_val = cells[col_method].strip() if col_method != -1 and col_method < len(cells) else ""
                         
                         if s1 is not None and s2 is not None:
                             auto_mn += 1
@@ -183,7 +192,9 @@ def load_predictions(xlsx_path, nvidia_api_key: str = "", progress_callback=None
                                 "team1": t1,
                                 "team2": t2,
                                 "score1": s1,
-                                "score2": s2
+                                "score2": s2,
+                                "winner": w_val,
+                                "method": m_val
                             }
                     except Exception:
                         pass
@@ -246,6 +257,8 @@ def load_predictions(xlsx_path, nvidia_api_key: str = "", progress_callback=None
                 col_t2 = None
                 col_s1 = None
                 col_s2 = None
+                col_winner = None
+                col_method = None
                 
                 for h in header:
                     h_str = str(h).strip().lower()
@@ -259,6 +272,10 @@ def load_predictions(xlsx_path, nvidia_api_key: str = "", progress_callback=None
                         col_s1 = h
                     elif "team 2 score" in h_str or "score 2" in h_str or ("team 2" in h_str and "score" in h_str) or "eam 2 scor" in h_str:
                         col_s2 = h
+                    elif "winner" in h_str or "winning team" in h_str or "match winner" in h_str:
+                        col_winner = h
+                    elif "method" in h_str or "win method" in h_str:
+                        col_method = h
                         
                 if not all([col_t1, col_t2, col_s1, col_s2]):
                     continue
@@ -273,6 +290,8 @@ def load_predictions(xlsx_path, nvidia_api_key: str = "", progress_callback=None
                         t2 = str(row[col_t2]).strip()
                         s1 = row[col_s1]
                         s2 = row[col_s2]
+                        w_val = str(row[col_winner]).strip() if col_winner and pd.notna(row[col_winner]) else ""
+                        m_val = str(row[col_method]).strip() if col_method and pd.notna(row[col_method]) else ""
                         
                         if pd.notna(s1) and pd.notna(s2):
                             auto_mn += 1
@@ -282,6 +301,8 @@ def load_predictions(xlsx_path, nvidia_api_key: str = "", progress_callback=None
                                 "team2": t2,
                                 "score1": int(s1),
                                 "score2": int(s2),
+                                "winner": w_val,
+                                "method": m_val,
                             }
                     except Exception:
                         pass
@@ -378,6 +399,7 @@ def score_player(predictions, actual_results):
 
         pred_found = False
         pred_s1, pred_s2 = None, None
+        pred_w, pred_m = None, None
 
         # 1. Try looking up by match_no first, but VERIFY the teams match
         pred = predictions.get(match_no)
@@ -388,11 +410,13 @@ def score_player(predictions, actual_results):
             if (pred_t1 == act_t1 or act_t1 in pred_t1 or pred_t1 in act_t1) and \
                (pred_t2 == act_t2 or act_t2 in pred_t2 or pred_t2 in act_t2):
                 pred_s1, pred_s2 = pred["score1"], pred["score2"]
+                pred_w, pred_m = pred.get("winner", ""), pred.get("method", "")
                 pred_found = True
             elif (pred_t1 == act_t2 or act_t2 in pred_t1 or pred_t1 in act_t2) and \
                  (pred_t2 == act_t1 or act_t1 in pred_t2 or pred_t2 in act_t1):
                 # Swapped order
                 pred_s1, pred_s2 = pred["score2"], pred["score1"]
+                pred_w, pred_m = pred.get("winner", ""), pred.get("method", "")
                 pred_found = True
 
         # 2. If match_no had different teams (or was missing), search ALL predictions
@@ -404,12 +428,14 @@ def score_player(predictions, actual_results):
                 if (p_t1 == act_t1 or act_t1 in p_t1 or p_t1 in act_t1) and \
                    (p_t2 == act_t2 or act_t2 in p_t2 or p_t2 in act_t2):
                     pred_s1, pred_s2 = p_pred["score1"], p_pred["score2"]
+                    pred_w, pred_m = p_pred.get("winner", ""), p_pred.get("method", "")
                     pred_found = True
                     break
                 elif (p_t1 == act_t2 or act_t2 in p_t1 or p_t1 in act_t2) and \
                      (p_t2 == act_t1 or act_t1 in p_t2 or p_t2 in act_t1):
                     # Swapped order
                     pred_s1, pred_s2 = p_pred["score2"], p_pred["score1"]
+                    pred_w, pred_m = p_pred.get("winner", ""), p_pred.get("method", "")
                     pred_found = True
                     break
 
@@ -425,28 +451,43 @@ def score_player(predictions, actual_results):
             })
             continue
 
-        pred_outcome = _outcome(pred_s1, pred_s2)
-        actual_outcome = _outcome(actual["score1"], actual["score2"])
-
         points = 0
         exact = False
-        result_correct = pred_outcome == actual_outcome
+        result_correct = False
 
         if pred_s1 == actual["score1"] and pred_s2 == actual["score2"]:
             points += EXACT_SCORE_POINTS
             exact = True
             exact_count += 1
-        elif result_correct:
+
+        # Check Winner
+        actual_winner = actual.get("winner", "")
+        act_w = _normalize(actual_winner)
+        pr_w = _normalize(pred_w) if pred_w else ""
+        
+        # If user didn't enter actual winner in the table but scores are unequal, infer it for convenience
+        if not act_w and actual["score1"] != actual["score2"]:
+            act_w = act_t1 if actual["score1"] > actual["score2"] else act_t2
+            
+        if pr_w and act_w and (pr_w == act_w or act_w in pr_w or pr_w in act_w):
             points += CORRECT_RESULT_POINTS
+            result_correct = True
             correct_result_count += 1
+
+        # Check Method
+        act_m = str(actual.get("method", "")).strip().lower()
+        pr_m = str(pred_m).strip().lower() if pred_m else ""
+        
+        if pr_m and act_m and (pr_m == act_m or pr_m in act_m or act_m in pr_m):
+            points += CORRECT_METHOD_POINTS
 
         total += points
 
         breakdown.append({
             "match_no": match_no,
             "fixture": f"{actual['team1']} vs {actual['team2']}",
-            "predicted": f"{pred_s1}-{pred_s2}",
-            "actual": f"{actual['score1']}-{actual['score2']}",
+            "predicted": f"{pred_s1}-{pred_s2} {pred_w} {pred_m}".strip(),
+            "actual": f"{actual['score1']}-{actual['score2']} {actual_winner} {actual.get('method', '')}".strip(),
             "points": points,
             "exact": exact,
             "result_correct": result_correct,
