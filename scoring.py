@@ -145,7 +145,9 @@ def load_predictions(xlsx_path, nvidia_api_key: str = "", progress_callback=None
                 # Fallback: find by "team 1" and "team 2"
                 for i, row in enumerate(table_rows):
                     cells = [c.strip() for c in row.split("|")[1:-1]]
-                    if any("team 1" in c.lower() for c in cells) and any("team 2" in c.lower() for c in cells):
+                    has_t1 = any("team 1" in c.lower() or "team1" in c.lower() for c in cells)
+                    has_t2 = any("team 2" in c.lower() or "team2" in c.lower() for c in cells)
+                    if has_t1 and has_t2:
                         header_index = i
                         headers = cells
                         break
@@ -162,15 +164,15 @@ def load_predictions(xlsx_path, nvidia_api_key: str = "", progress_callback=None
                 
                 for idx, h in enumerate(headers):
                     h_lower = h.lower()
-                    if "match" in h_lower:
+                    if "match" in h_lower and "no" in h_lower:
                         col_match = idx
-                    elif "team 1" in h_lower and "score" not in h_lower:
+                    elif ("team 1" in h_lower or "team1" in h_lower) and "score" not in h_lower:
                         col_t1 = idx
-                    elif "team 2" in h_lower and "score" not in h_lower:
+                    elif ("team 2" in h_lower or "team2" in h_lower) and "score" not in h_lower:
                         col_t2 = idx
-                    elif "team 1 score" in h_lower or "score 1" in h_lower or ("team 1" in h_lower and "score" in h_lower):
+                    elif "score 1" in h_lower or "score1" in h_lower or (("team 1" in h_lower or "team1" in h_lower) and "score" in h_lower):
                         col_s1 = idx
-                    elif "team 2 score" in h_lower or "score 2" in h_lower or ("team 2" in h_lower and "score" in h_lower):
+                    elif "score 2" in h_lower or "score2" in h_lower or (("team 2" in h_lower or "team2" in h_lower) and "score" in h_lower):
                         col_s2 = idx
                     elif "winner" in h_lower or "winning team" in h_lower or "match winner" in h_lower:
                         col_winner = idx
@@ -249,7 +251,7 @@ def load_predictions(xlsx_path, nvidia_api_key: str = "", progress_callback=None
                 for r_idx in range(len(raw)):
                     for c_idx in range(len(raw.columns)):
                         val = str(raw.iloc[r_idx, c_idx]).strip().lower()
-                        if "match no" in val or val == "match no." or "team 1" in val or "eam 1" in val:
+                        if "match no" in val or val == "match no." or "team 1" in val or "team1" in val or "eam 1" in val:
                             header_row = r_idx
                             break
                     if header_row is not None:
@@ -276,13 +278,13 @@ def load_predictions(xlsx_path, nvidia_api_key: str = "", progress_callback=None
                     h_str = str(h).strip().lower()
                     if "match no" in h_str:
                         col_match = h
-                    elif ("team 1" in h_str or "eam 1" in h_str) and "scor" not in h_str:
+                    elif ("team 1" in h_str or "team1" in h_str or "eam 1" in h_str) and "scor" not in h_str:
                         col_t1 = h
-                    elif ("team 2" in h_str or "eam 2" in h_str) and "scor" not in h_str:
+                    elif ("team 2" in h_str or "team2" in h_str or "eam 2" in h_str) and "scor" not in h_str:
                         col_t2 = h
-                    elif "team 1 score" in h_str or "score 1" in h_str or ("team 1" in h_str and "score" in h_str) or "eam 1 scor" in h_str:
+                    elif "score 1" in h_str or "score1" in h_str or (("team 1" in h_str or "team1" in h_str) and "score" in h_str) or "eam 1 scor" in h_str:
                         col_s1 = h
-                    elif "team 2 score" in h_str or "score 2" in h_str or ("team 2" in h_str and "score" in h_str) or "eam 2 scor" in h_str:
+                    elif "score 2" in h_str or "score2" in h_str or (("team 2" in h_str or "team2" in h_str) and "score" in h_str) or "eam 2 scor" in h_str:
                         col_s2 = h
                     elif "winner" in h_str or "winning team" in h_str or "match winner" in h_str:
                         col_winner = h
