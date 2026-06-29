@@ -57,24 +57,23 @@ def load_predictions(xlsx_path, nvidia_api_key: str = "", progress_callback=None
     if xlsx_path is None:
         return {}
 
-    # 1. Direct LLM / MarkItDown parser (most robust, handles any layout)
-    # ------------------------------------------------------------------
-    if nvidia_api_key and nvidia_api_key.strip():
-        try:
-            from llm_parser import parse_predictions
-            _seek0(xlsx_path)
-            filename = getattr(xlsx_path, "name", "")
-            result = parse_predictions(
-                xlsx_path,
-                filename=filename,
-                api_key=nvidia_api_key.strip(),
-                progress_callback=progress_callback,
-            )
-            # Only accept if at least one player has actual predictions
-            if result and any(v["predictions"] for v in result.values()):
-                return result
-        except Exception:
-            pass  # fall through to next method
+    # 1. llm_parser (most robust — handles multi-table sheets, any layout)
+    # -------------------------------------------------------------------
+    try:
+        from llm_parser import parse_predictions
+        _seek0(xlsx_path)
+        filename = getattr(xlsx_path, "name", "")
+        result = parse_predictions(
+            xlsx_path,
+            filename=filename,
+            api_key=nvidia_api_key.strip() if nvidia_api_key else "",
+            progress_callback=progress_callback,
+        )
+        # Only accept if at least one player has actual predictions
+        if result and any(v["predictions"] for v in result.values()):
+            return result
+    except Exception:
+        pass  # fall through to next method
 
 
     _seek0(xlsx_path)
@@ -246,99 +245,113 @@ def load_predictions(xlsx_path, nvidia_api_key: str = "", progress_callback=None
             try:
                 raw = pd.read_excel(xl, sheet_name=sheet, header=None)
                 
-                # Search all cells in the worksheet for "Match No.", "Team 1", or "eam 1"
-                header_row = None
-                for r_idx in range(len(raw)):
-                    for c_idx in range(len(raw.columns)):
-                        val = str(raw.iloc[r_idx, c_idx]).strip().lower()
-                        if "match no" in val or val == "match no." or "team 1" in val or "team1" in val or "eam 1" in val:
-                            header_row = r_idx
-                            break
-                    if header_row is not None:
-                        break
-                        
-                if header_row is None:
+                # Scan ALL rows to find ALL header rows (handles multi-table sheets:
+                # e.g. group-stage table + RO32 table in the same sheet).
+                def _is_table_header(row_vals):
+                    """True if this row looks like a match prediction header."""
+                    # Strip whitespace from all values before checking
+                    lv = [str(v).strip().lower() for v in row_vals if str(v).strip() not in ("", "nan")]
+                    has_team = any(
+                        v.strip() in ("team 1", "team1", "team 2", "team2") or
+                        (("team" in v) and ("1" in v or "2" in v))
+                        for v in lv
+                    )
+                    has_score = any("score" in v for v in lv)
+                    has_match = any("match" in v for v in lv)
+                    has_winner = any(v.strip() == "winner" for v in lv)
+                    has_method = any("method" in v for v in lv)
+                    # A valid header needs teams + (scores OR match# OR winner/method)
+                    return has_team and (has_score or has_match or has_winner or has_method)
+
+                header_candidates = [
+                    r for r in range(len(raw))
+                    if _is_table_header(raw.iloc[r].tolist())
+                ]
+
+                if not header_candidates:
                     continue
-                    
-                # Align the headers
-                header = raw.iloc[header_row].tolist()
-                data = raw.iloc[header_row + 1:].copy()
-                data.columns = header
-                
-                # Map header names robustly
-                col_match = None
-                col_t1 = None
-                col_t2 = None
-                col_s1 = None
-                col_s2 = None
-                col_winner = None
-                col_method = None
-                
-                for h in header:
-                    h_str = str(h).strip().lower()
-                    if "match no" in h_str:
-                        col_match = h
-                    elif ("team 1" in h_str or "team1" in h_str or "eam 1" in h_str) and "scor" not in h_str:
-                        col_t1 = h
-                    elif ("team 2" in h_str or "team2" in h_str or "eam 2" in h_str) and "scor" not in h_str:
-                        col_t2 = h
-                    elif "score 1" in h_str or "score1" in h_str or (("team 1" in h_str or "team1" in h_str) and "score" in h_str) or "eam 1 scor" in h_str:
-                        col_s1 = h
-                    elif "score 2" in h_str or "score2" in h_str or (("team 2" in h_str or "team2" in h_str) and "score" in h_str) or "eam 2 scor" in h_str:
-                        col_s2 = h
-                    elif "winner" in h_str or "winning team" in h_str or "match winner" in h_str:
-                        col_winner = h
-                    elif "method" in h_str or "win method" in h_str:
-                        col_method = h
-                        
-                if not all([col_t1, col_t2, col_s1, col_s2]):
-                    continue
-                    
-                data = data.dropna(subset=[col_t1, col_s1], how='all')
-                
+
                 preds = {}
-                auto_mn = 0
-                for _, row in data.iterrows():
-                    try:
-                        t1 = str(row[col_t1]).strip()
-                        t2 = str(row[col_t2]).strip()
-                        s1 = row[col_s1]
-                        s2 = row[col_s2]
-                        w_val = str(row[col_winner]).strip() if col_winner and pd.notna(row[col_winner]) else ""
-                        m_val = str(row[col_method]).strip() if col_method and pd.notna(row[col_method]) else ""
-                        
-                        if pd.notna(s1) and pd.notna(s2):
-                            auto_mn += 1
-                            match_no = auto_mn
-                            preds[match_no] = {
+
+                for h_idx in header_candidates:
+                    hdr = [str(v).strip() for v in raw.iloc[h_idx].tolist()]
+                    sub = raw.iloc[h_idx + 1:].copy()
+                    sub.columns = hdr
+
+                    c_t1 = c_t2 = c_s1 = c_s2 = c_winner = c_method = None
+                    for col in hdr:
+                        cl = col.strip().lower()
+                        if ("team 1" in cl or "team1" in cl) and "scor" not in cl:
+                            c_t1 = col
+                        elif ("team 2" in cl or "team2" in cl) and "scor" not in cl:
+                            c_t2 = col
+                        elif "score 1" in cl or "score1" in cl or \
+                             (("team 1" in cl or "team1" in cl) and "score" in cl):
+                            c_s1 = col
+                        elif "score 2" in cl or "score2" in cl or \
+                             (("team 2" in cl or "team2" in cl) and "score" in cl):
+                            c_s2 = col
+                        elif "winner" in cl:
+                            c_winner = col
+                        elif "method" in cl:
+                            c_method = col
+
+                    if not (c_t1 and c_t2):
+                        continue  # not a match table
+                    if not (c_s1 and c_s2) and not c_winner:
+                        continue
+
+                    sub = sub.dropna(subset=[c_t1], how='all')
+                    for _, row in sub.iterrows():
+                        try:
+                            t1 = str(row[c_t1]).strip()
+                            t2 = str(row[c_t2]).strip()
+                            if not t1 or t1.lower() in ("nan", "none", ""):
+                                continue
+                            if not t2 or t2.lower() in ("nan", "none", ""):
+                                continue
+
+                            s1_raw = row[c_s1] if c_s1 and pd.notna(row.get(c_s1)) else None
+                            s2_raw = row[c_s2] if c_s2 and pd.notna(row.get(c_s2)) else None
+                            if s1_raw is None or s2_raw is None:
+                                continue
+
+                            w_val = str(row[c_winner]).strip() if c_winner and pd.notna(row.get(c_winner)) else ""
+                            m_val = str(row[c_method]).strip() if c_method and pd.notna(row.get(c_method)) else ""
+                            if w_val.lower() in ("nan", "none"):
+                                w_val = ""
+                            if m_val.lower() in ("nan", "none"):
+                                m_val = ""
+
+                            match_key = len(preds) + 1
+                            preds[match_key] = {
                                 "team1": t1,
                                 "team2": t2,
-                                "score1": int(s1),
-                                "score2": int(s2),
+                                "score1": int(float(str(s1_raw))),
+                                "score2": int(float(str(s2_raw))),
                                 "winner": w_val,
                                 "method": m_val,
                             }
-                    except Exception:
-                        pass
-                        
-                # Predicted overall winner
+                        except Exception:
+                            pass
+
+                # Predicted overall winner search
                 winner = None
                 for r_idx in range(len(raw)):
                     for c_idx in range(len(raw.columns)):
                         val = str(raw.iloc[r_idx, c_idx]).strip().lower()
                         if "winning team" in val or "champion" in val:
-                            if c_idx + 1 < len(raw.columns):
-                                w_val = raw.iloc[r_idx, c_idx + 1]
-                                if pd.notna(w_val) and str(w_val).strip():
-                                    winner = str(w_val).strip()
-                                    break
+                            w_val = raw.iloc[r_idx, c_idx + 1] if c_idx + 1 < len(raw.columns) else None
+                            if w_val is not None and pd.notna(w_val) and str(w_val).strip() not in ("", "nan"):
+                                winner = str(w_val).strip()
+                                break
                     if winner:
                         break
-                        
+
                 players[sheet] = {"predictions": preds, "winning_team_pick": winner}
             except Exception:
                 pass
-                
+
         return players
     except Exception:
         return {}

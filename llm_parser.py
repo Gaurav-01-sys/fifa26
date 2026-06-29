@@ -99,18 +99,19 @@ _COL_ALIASES = {
     "team 1": "team1", "team1": "team1", "home": "team1", "eam 1": "team1",
     # team 2
     "team 2": "team2", "team2": "team2", "away": "team2", "eam 2": "team2",
-    # score 1
+    # score 1  (both "Score 1" with space and "Score1" without)
     "team 1 score": "score1", "score 1": "score1", "score1": "score1",
-    "goals 1": "score1", "team1 score": "score1", "eam 1 scor": "score1", 
+    "goals 1": "score1", "team1 score": "score1", "eam 1 scor": "score1",
     "eam 1 score": "score1", "eam 1 scor ": "score1",
     # score 2
     "team 2 score": "score2", "score 2": "score2", "score2": "score2",
-    "goals 2": "score2", "team2 score": "score2", "eam 2 scor": "score2", 
+    "goals 2": "score2", "team2 score": "score2", "eam 2 scor": "score2",
     "eam 2 score": "score2", "eam 2 scor ": "score2",
     # winner
     "winner": "winner", "winning team": "winner", "match winner": "winner",
     # method
-    "method": "method", "win method": "method", "winning method": "method", "method ": "method", " method": "method", "match victory method": "method",
+    "method": "method", "win method": "method", "winning method": "method",
+    "method ": "method", " method": "method", "match victory method": "method",
 }
 
 
@@ -152,93 +153,96 @@ def _parse_sheet(sheet_name: str, sheet_body: str) -> dict:
 
     Strategy
     --------
-    1. Walk rows to find the "Winning Team" cell → extract winner.
-    2. Find the header row (row containing column names like Team 1, Score).
-    3. Map columns by alias.
-    4. Parse data rows after the header.
+    1. Walk rows to find the "Winning Team" cell -> extract winner.
+    2. Find ALL header rows (rows containing >= 2 recognised column names).
+    3. For each header, parse data rows until the next header or end.
+    4. Merge all predictions (supports multi-table sheets: group stage + RO32).
     """
     rows = _parse_md_rows(sheet_body)
 
     winner = None
-    header_idx = None
-    col_map = {}  # canonical_name → column_index
+    header_blocks = []  # list of (header_idx, col_map)
 
-    # --- Pass 1: find winner row and header row ---
+    # --- Pass 1: find winner row and ALL header rows ---
     for i, row in enumerate(rows):
-        row_lower = [c.lower() for c in row]
+        row_lower = [c.strip().lower() for c in row]
 
         # Winning team row: first cell is "winning team"
         if row_lower and row_lower[0] == "winning team":
-            # winner is the first non-empty, non-"unnamed", non-"nan" cell after index 0
             for cell in row[1:]:
-                cl = cell.lower()
+                cl = cell.strip().lower()
                 if cl and cl not in ("nan", "none", "") and not cl.startswith("unnamed"):
                     winner = cell.strip()
                     break
 
-        # Header row: contains at least two of our recognised column names
+        # Header row: contains at least two recognised column names
         matches = sum(1 for c in row_lower if c in _COL_ALIASES)
-        if matches >= 2 and header_idx is None:
-            header_idx = i
+        if matches >= 2:
+            col_map = {}
             for j, cell in enumerate(row_lower):
                 canonical = _COL_ALIASES.get(cell)
                 if canonical and canonical not in col_map:
                     col_map[canonical] = j
+            has_required = (
+                {"team1", "team2", "score1", "score2"}.issubset(col_map) or
+                ({"team1", "team2", "winner"}.issubset(col_map) and "score1" in col_map)
+            )
+            if has_required:
+                header_blocks.append((i, col_map))
 
-    if header_idx is None or not col_map:
+    if not header_blocks:
         return {"predictions": {}, "winning_team_pick": winner}
 
-    # Need at least team1+team2+score1+score2
-    required = {"team1", "team2", "score1", "score2"}
-    if not required.issubset(col_map):
-        return {"predictions": {}, "winning_team_pick": winner}
-
-    # --- Pass 2: extract data rows after the header ---
+    # --- Pass 2: for each header block, parse its data rows ---
     preds = {}
     auto_match_no = 0
 
-    for row in rows[header_idx + 1:]:
-        if len(row) <= max(col_map.values()):
-            continue  # row too short
+    for b_idx, (header_idx, col_map) in enumerate(header_blocks):
+        next_header = header_blocks[b_idx + 1][0] if b_idx + 1 < len(header_blocks) else len(rows)
+        data_rows = rows[header_idx + 1: next_header]
 
-        def cell(key):
-            idx = col_map.get(key)
-            return row[idx].strip() if idx is not None and idx < len(row) else ""
+        for row in data_rows:
+            max_col = max(col_map.values())
+            if len(row) <= max_col:
+                continue
 
-        team1 = cell("team1")
-        team2 = cell("team2")
-        s1_raw = cell("score1")
-        s2_raw = cell("score2")
-        winner_val = cell("winner")
-        method_val = cell("method")
+            def cell(key, _row=row, _cm=col_map):
+                idx = _cm.get(key)
+                return _row[idx].strip() if idx is not None and idx < len(_row) else ""
 
-        # Skip blank or NaN rows
-        if not team1 or team1.lower() in ("nan", "none", ""):
-            continue
-        if not s1_raw or s1_raw.lower() in ("nan", "none", ""):
-            continue
-        if not s2_raw or s2_raw.lower() in ("nan", "none", ""):
-            continue
+            team1 = cell("team1")
+            team2 = cell("team2")
+            s1_raw = cell("score1")
+            s2_raw = cell("score2")
+            winner_val = cell("winner")
+            method_val = cell("method")
 
-        # Parse scores (handle floats like "2.0")
-        try:
-            s1 = int(float(s1_raw))
-            s2 = int(float(s2_raw))
-        except (ValueError, TypeError):
-            continue
+            if not team1 or team1.lower() in ("nan", "none", ""):
+                continue
+            if not s1_raw or s1_raw.lower() in ("nan", "none", ""):
+                continue
+            if not s2_raw or s2_raw.lower() in ("nan", "none", ""):
+                continue
+            if winner_val.lower() in ("nan", "none"):
+                winner_val = ""
+            if method_val.lower() in ("nan", "none"):
+                method_val = ""
 
-        # Match number (ignored, just auto-increment)
-        auto_match_no += 1
-        match_no = auto_match_no
+            try:
+                s1 = int(float(s1_raw))
+                s2 = int(float(s2_raw))
+            except (ValueError, TypeError):
+                continue
 
-        preds[match_no] = {
-            "team1": team1,
-            "team2": team2,
-            "score1": s1,
-            "score2": s2,
-            "winner": winner_val,
-            "method": method_val,
-        }
+            auto_match_no += 1
+            preds[auto_match_no] = {
+                "team1": team1,
+                "team2": team2,
+                "score1": s1,
+                "score2": s2,
+                "winner": winner_val,
+                "method": method_val,
+            }
 
     return {"predictions": preds, "winning_team_pick": winner}
 
