@@ -110,7 +110,7 @@ _COL_ALIASES = {
     # winner
     "winner": "winner", "winning team": "winner", "match winner": "winner",
     # method
-    "method": "method", "win method": "method", "winning method": "method", "method ": "method", " method": "method",
+    "method": "method", "win method": "method", "winning method": "method", "method ": "method", " method": "method", "match victory method": "method",
 }
 
 

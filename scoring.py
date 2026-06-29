@@ -21,6 +21,18 @@ def _outcome(s1, s2):
     return "draw"
 
 
+def _normalize_method(m):
+    """Normalize method string to handle abbreviations like ET or Pens."""
+    m = str(m).strip().lower()
+    if m in ("et", "extra time", "aet"):
+        return "extra time"
+    if m in ("pens", "penalties", "p", "pen"):
+        return "penalties"
+    if m in ("90 mins", "90", "90 m", "regular", "rt", "ft"):
+        return "90 mins"
+    return m
+
+
 def _seek0(f):
     """Seek a file-like stream back to the start (no-op for plain paths)."""
     if hasattr(f, "seek"):
@@ -475,8 +487,8 @@ def score_player(predictions, actual_results):
             correct_result_count += 1
 
         # Check Method
-        act_m = str(actual.get("method", "")).strip().lower()
-        pr_m = str(pred_m).strip().lower() if pred_m else ""
+        act_m = _normalize_method(actual.get("method", ""))
+        pr_m = _normalize_method(pred_m) if pred_m else ""
         
         if pr_m and act_m and (pr_m == act_m or pr_m in act_m or act_m in pr_m):
             points += CORRECT_METHOD_POINTS
