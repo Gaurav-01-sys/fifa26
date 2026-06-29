@@ -172,7 +172,7 @@ def _to_sportsdb_name(name):
 
 
 def _search_sportsdb(t1, t2):
-    """Single search attempt against TheSportsDB. Returns (score1, score2) or (None, None)."""
+    """Single search attempt against TheSportsDB. Returns (score1, score2, winner, method) or (None, None, None, None)."""
     url = "https://www.thesportsdb.com/api/v1/json/3/searchevents.php"
     resp = requests.get(url, params={"e": f"{t1} vs {t2}"}, timeout=15)
     resp.raise_for_status()
@@ -182,38 +182,51 @@ def _search_sportsdb(t1, t2):
         s1_raw = event.get("intHomeScore")
         s2_raw = event.get("intAwayScore")
         if s1_raw is not None and s2_raw is not None:
+            s1_int, s2_int = int(s1_raw), int(s2_raw)
             db_home = _normalize(event.get("strHomeTeam", ""))
             t1_norm = _normalize(t1)
             t2_norm = _normalize(t2)
-            # If the result is stored reversed (t1=away, t2=home), flip the scores
+            
+            # Determine winner & method
+            winner = None
+            method = "90 mins"
+            if s1_int > s2_int:
+                winner = event.get("strHomeTeam", t1)
+            elif s2_int > s1_int:
+                winner = event.get("strAwayTeam", t2)
+            # if scores are equal, we can't reliably infer winner/method without more data
+
+            # If the result is stored reversed (t1=away, t2=home), flip the scores and winner
             if t2_norm in db_home and t1_norm not in db_home:
-                return int(s2_raw), int(s1_raw)
-            return int(s1_raw), int(s2_raw)
-    return None, None
+                # If t2 was home, then the returned winner name is fine, but s1, s2 order needs flip
+                return s2_int, s1_int, winner, method
+            
+            return s1_int, s2_int, winner, method
+    return None, None, None, None
 
 
 def fetch_score_from_web(team1, team2):
     """Fallback: Fetch score via TheSportsDB free API. No API key needed.
     Tries multiple name aliases and both team orderings.
-    Returns (score1, score2) or (None, None).
+    Returns (score1, score2, winner, method) or (None, None, None, None).
     """
     db_t1 = _to_sportsdb_name(team1)
     db_t2 = _to_sportsdb_name(team2)
 
     try:
         # Attempt 1: normal order
-        s1, s2 = _search_sportsdb(db_t1, db_t2)
+        s1, s2, w, m = _search_sportsdb(db_t1, db_t2)
         if s1 is not None:
-            return s1, s2
+            return s1, s2, w, m
 
         # Attempt 2: swapped order (some fixtures stored with home/away reversed)
-        s1, s2 = _search_sportsdb(db_t2, db_t1)
+        s1, s2, w, m = _search_sportsdb(db_t2, db_t1)
         if s1 is not None:
             # scores come back in the db's perspective; since we searched t2 vs t1,
             # the home score = t2's score and away score = t1's score
-            return s2, s1
+            return s2, s1, w, m
 
     except Exception as e:
         print(f"TheSportsDB Error for {team1} vs {team2}: {e}")
 
-    return None, None
+    return None, None, None, None

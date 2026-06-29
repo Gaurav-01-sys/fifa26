@@ -279,11 +279,30 @@ if (
     from live_results import fetch_score_from_web
     auto_fetched = 0
     for am, ad in _ar.items():
-        if ad.get("score1") is None or ad.get("score2") is None:
-            s1, s2 = fetch_score_from_web(ad["team1"], ad["team2"])
+        needs_score = ad.get("score1") is None or ad.get("score2") is None
+        needs_winner = am > 72 and not ad.get("winner")
+        
+        if needs_score or needs_winner:
+            s1, s2, w, m = fetch_score_from_web(ad["team1"], ad["team2"])
             if s1 is not None and s2 is not None:
                 _ar[am]["score1"] = s1
                 _ar[am]["score2"] = s2
+                
+                if w and not ad.get("winner"):
+                    from live_results import _normalize
+                    team1_norm = _normalize(ad["team1"])
+                    team2_norm = _normalize(ad["team2"])
+                    w_norm = _normalize(w)
+                    
+                    if w_norm == team1_norm or w_norm in team1_norm:
+                        _ar[am]["winner"] = ad["team1"]
+                    elif w_norm == team2_norm or w_norm in team2_norm:
+                        _ar[am]["winner"] = ad["team2"]
+                    else:
+                        _ar[am]["winner"] = w
+                        
+                    if m:
+                        _ar[am]["method"] = m
                 auto_fetched += 1
     st.session_state.actual_results = _ar
     st.session_state._fixtures_hash = _fixtures_hash
@@ -358,11 +377,33 @@ with col2:
             from live_results import fetch_score_from_web
             updates = 0
             for am, ad in st.session_state.actual_results.items():
-                if ad.get("score1") is None or ad.get("score2") is None:
-                    s1, s2 = fetch_score_from_web(ad["team1"], ad["team2"])
+                # We want to fetch if score is missing, or if it's a KO match (m>72) and winner is missing
+                needs_score = ad.get("score1") is None or ad.get("score2") is None
+                needs_winner = am > 72 and not ad.get("winner")
+                
+                if needs_score or needs_winner:
+                    s1, s2, w, m = fetch_score_from_web(ad["team1"], ad["team2"])
                     if s1 is not None and s2 is not None:
                         st.session_state.actual_results[am]["score1"] = s1
                         st.session_state.actual_results[am]["score2"] = s2
+                        
+                        # Only overwrite winner if the API found one and we don't already have one
+                        if w and not ad.get("winner"):
+                            # Normalize the winner name to match the team names in the fixture
+                            # to handle aliases (e.g. South Korea vs Korea Republic)
+                            team1_norm = _normalize(ad["team1"])
+                            team2_norm = _normalize(ad["team2"])
+                            w_norm = _normalize(w)
+                            
+                            if w_norm == team1_norm or w_norm in team1_norm:
+                                st.session_state.actual_results[am]["winner"] = ad["team1"]
+                            elif w_norm == team2_norm or w_norm in team2_norm:
+                                st.session_state.actual_results[am]["winner"] = ad["team2"]
+                            else:
+                                st.session_state.actual_results[am]["winner"] = w
+                                
+                            if m:
+                                st.session_state.actual_results[am]["method"] = m
                         updates += 1
             if updates > 0:
                 st.success(f"Successfully fetched {updates} match scores from the web!")
