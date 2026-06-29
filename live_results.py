@@ -205,8 +205,72 @@ def _search_sportsdb(t1, t2):
     return None, None, None, None
 
 
+def _search_espn(t1, t2):
+    """Secondary fallback: Search against ESPN's public API. No API key needed."""
+    url = "https://site.api.espn.com/apis/site/v2/sports/soccer/fifa.world/scoreboard"
+    try:
+        # Fetch all matches in the tournament window
+        resp = requests.get(url, params={"dates": "20260611-20260719"}, timeout=15)
+        resp.raise_for_status()
+        events = resp.json().get("events", [])
+        
+        t1_norm = _normalize(t1)
+        t2_norm = _normalize(t2)
+        
+        for e in events:
+            comps = e.get("competitions", [])
+            if not comps: continue
+            competitors = comps[0].get("competitors", [])
+            if len(competitors) != 2: continue
+            
+            c1, c2 = competitors[0], competitors[1]
+            n1 = _normalize(c1.get("team", {}).get("name", ""))
+            n2 = _normalize(c2.get("team", {}).get("name", ""))
+            
+            match_found = False
+            c1_is_t1 = False
+            
+            if (t1_norm in n1 or n1 in t1_norm) and (t2_norm in n2 or n2 in t2_norm):
+                match_found = True
+                c1_is_t1 = True
+            elif (t1_norm in n2 or n2 in t1_norm) and (t2_norm in n1 or n1 in t2_norm):
+                match_found = True
+                c1_is_t1 = False
+                
+            if match_found:
+                if not e.get("status", {}).get("type", {}).get("completed", False):
+                    continue # Match is not finished yet
+                
+                if c1.get("score") is None or c2.get("score") is None:
+                    continue
+                    
+                s1_int = int(c1["score"]) if c1_is_t1 else int(c2["score"])
+                s2_int = int(c2["score"]) if c1_is_t1 else int(c1["score"])
+                
+                winner = None
+                method = "90 mins"
+                
+                if c1.get("winner"):
+                    winner = c1.get("team", {}).get("name", "")
+                elif c2.get("winner"):
+                    winner = c2.get("team", {}).get("name", "")
+                
+                status_detail = e.get("status", {}).get("type", {}).get("detail", "")
+                if "AET" in status_detail or "ET" in status_detail or "Extra" in status_detail:
+                    method = "Extra Time"
+                elif "Pen" in status_detail:
+                    method = "Penalties"
+                
+                return s1_int, s2_int, winner, method
+                
+    except Exception as e:
+        print(f"ESPN Error for {t1} vs {t2}: {e}")
+        
+    return None, None, None, None
+
+
 def fetch_score_from_web(team1, team2):
-    """Fallback: Fetch score via TheSportsDB free API. No API key needed.
+    """Fallback: Fetch score via free web APIs. No API key needed.
     Tries multiple name aliases and both team orderings.
     Returns (score1, score2, winner, method) or (None, None, None, None).
     """
@@ -214,19 +278,22 @@ def fetch_score_from_web(team1, team2):
     db_t2 = _to_sportsdb_name(team2)
 
     try:
-        # Attempt 1: normal order
+        # Attempt 1: normal order (TheSportsDB)
         s1, s2, w, m = _search_sportsdb(db_t1, db_t2)
         if s1 is not None:
             return s1, s2, w, m
 
-        # Attempt 2: swapped order (some fixtures stored with home/away reversed)
+        # Attempt 2: swapped order (TheSportsDB)
         s1, s2, w, m = _search_sportsdb(db_t2, db_t1)
         if s1 is not None:
-            # scores come back in the db's perspective; since we searched t2 vs t1,
-            # the home score = t2's score and away score = t1's score
             return s2, s1, w, m
-
+            
     except Exception as e:
         print(f"TheSportsDB Error for {team1} vs {team2}: {e}")
+
+    # Attempt 3: ESPN Public API Fallback
+    s1, s2, w, m = _search_espn(team1, team2)
+    if s1 is not None:
+        return s1, s2, w, m
 
     return None, None, None, None
