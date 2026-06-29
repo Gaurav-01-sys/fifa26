@@ -26,6 +26,7 @@ from scoring import (
     build_leaderboard,
     detailed_breakdown,
     CORRECT_RESULT_POINTS,
+    CORRECT_METHOD_POINTS,
     EXACT_SCORE_POINTS,
 )
 from live_results import (
@@ -90,8 +91,10 @@ if st.sidebar.button("🔄 Refresh Live Scores", help="Fetch the latest match re
 st.sidebar.markdown("---")
 st.sidebar.markdown("### Scoring Rules")
 st.sidebar.markdown(
-    f"- Correct winner/draw: **{CORRECT_RESULT_POINTS} pts**\n"
-    f"- Exact score: **{EXACT_SCORE_POINTS} pts** (instead of correct winner/draw points, not in addition)\n"
+    f"- Correct Winner Prediction: **{CORRECT_RESULT_POINTS} pts**\n"
+    f"- Correct Method Prediction: **{CORRECT_METHOD_POINTS} pts**\n"
+    f"- Exact Score Prediction: **{EXACT_SCORE_POINTS} pts**\n"
+    "- Note: For extra time, exact score after extra time is considered.\n"
     "- Tie-break: more exact-score predictions wins; "
     "still tied → prize split equally"
 )
